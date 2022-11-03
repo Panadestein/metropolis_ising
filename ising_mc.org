@@ -1,0 +1,199 @@
+#+TITLE: Ising model using Monte Carlo methods
+
+* Theoretical description
+
+The [[https://en.wikipedia.org/wiki/Ising_model][Ising model]] is a statistical mechanics model originally developed to study [[https://en.wikipedia.org/wiki/Ferromagnetism][ferromagnetism]]. A system
+of magnetic particles can be described by a two dimensional arrangement (lattice) of atoms. To each atom
+\(i\) on the lattice, a discrete spin magnetic moment \(\sigma_i=\pm 1\) is assigned.
+
+#+CAPTION: Schematic representation of the 2D spin arrangement
+#+ATTR_ORG: :width 500
+#+ATTR_HTML: width="100px"
+[[./figures/ising_grid_small.png]]
+
+
+The Hamiltonian of the system is given by:
+
+#+BEGIN_LaTeX latex
+\begin{equation}
+H = J\sum_{\langle ij \rangle} \sigma_i\sigma_j
+\end{equation}
+#+END_LaTeX
+
+where the symbol \(\langle ij \rangle\) implies a sum over the nearest neighbors and \(J\) is the strength
+of the exchange interaction. We will consider in this example ferromagnetic systems only, which implies
+a value of \(J > 0\).
+
+The canonical [[https://en.wikipedia.org/wiki/Partition_function_(statistical_mechanics)][partition function]] of the system is given by:
+
+#+BEGIN_LaTeX latex
+\begin{equation}
+Z(\beta) = \sum_S e^{-\beta H}
+\end{equation}
+#+END_LaTeX
+
+where \(\beta = 1/k_B T\) with \(T\) being the temperature and \(k_B\) the Boltzmann’s constant. The sum runs
+over all possible spin configurations \(S\) of the system. Following the statistical mechanics reasoning, observables
+are computed as follows:
+
+#+BEGIN_LaTeX latex
+\begin{equation}
+\langle O \rangle = \frac{1}{Z(\beta)}\sum_S O(S) e^{-\beta H}
+\end{equation}
+#+END_LaTeX
+
+The total number of states for a square grid of length \(L\) (*How many are there?*) suffers
+from the [[https://en.wikipedia.org/wiki/Curse_of_dimensionality][curse of dimensionality]]. This is where Monte Carlo methods shine. The estimation of
+the observable's value is given by:
+
+#+BEGIN_LaTeX latex
+\begin{equation}
+\langle O \rangle \approx \frac{1}{N} \sum_i^{N} O_i 
+\end{equation}
+#+END_LaTeX
+
+
+** Metropolis-Hastings algorithm
+
+We will assume ergodicity in our implementation, together with the =single spin-flip dynamics= principle.
+This means that in each transition we will change only one spin site on the lattice. We can then set our
+transition probability to:
+
+#+BEGIN_LaTeX latex
+\begin{equation}
+P(x, y) = g(x, y)A(x, y)
+\end{equation}
+#+END_LaTeX
+
+where the selection probability is homogeneous \(g(x, y) = 1/L^2\). The acceptance probability can be
+set to the Metropolis choice after applying [[https://en.wikipedia.org/wiki/Detailed_balance][detail balance]]:
+
+#+BEGIN_LaTeX latex
+\begin{equation}
+A(x, y) = 
+  \begin{cases}
+   e^{-\beta (H_x - H_y)} & H_x - H_y > 0 \\
+   1 & \text{otherwise}
+  \end{cases}
+\end{equation}
+#+END_LaTeX
+
+The algorithm's steps are then:
+
+1. Pick a spin site with probability \(g(x, y)\) and flip it
+2. Compute the energy change \(\updelta H=H_x-H_y\)
+3. Accept the new configuration with probability \(A(x, y)\)
+4. Repeat
+
+* Coding exercise
+
+** Setting the environment
+
+#+begin_src jupyter-python :session ising
+  """Imports and global variables"""
+  import numpy as np
+  import matplotlib.pyplot as plt
+#+end_src
+
+** Main functions
+
+#+begin_src jupyter-python :session ising
+  def init_state(L):
+      """Initialized spin grid"""
+      return 2 * np.random.randint(2, size=(L, L)) - 1
+
+  def mc_update(grid, beta, L):
+      """Updating step using the MH algorithm"""
+      for _ in np.arange(L):
+          for _ in np.arange(L):
+              # Select a center with probability 1/L^2
+              i, j = np.random.randint(L, size=(1, 2)).T
+
+              # Get the spin value from selected center
+              s = grid[i, j]
+
+              # Periodic boundary conditions (4 neighbors)
+              neighbor_s = grid[(i + 1) % L, j] + \
+                           grid[(i - 1) % L, j] + \
+                           grid[i, (j + 1) % L] + \
+                           grid[i, (j - 1) % L]
+
+              # Change in energy
+              dE = 2 * s * neighbor_s
+
+              # Apply acceptance criterion
+              if dE < 0:
+                  s *= -1
+              elif np.random.rand() < np.exp(-beta * dE):
+                  s *= -1
+
+              # Update spin site
+              grid[i, j] = s
+
+      return grid
+
+  def energ(grid, L):
+      """Compute energy of new configuration"""
+      en = 0
+      for i in np.arange(L):
+          for j in np.arange(L):
+              s = grid[i, j]
+              neighbor_s = grid[(i + 1) % L, j] + \
+                           grid[(i - 1) % L, j] + \
+                           grid[i, (j + 1) % L] + \
+                           grid[i, (j - 1) % L]
+              en -= s * neighbor_s
+      return en / 2
+#+end_src
+
+** Set numerical experiment conditions
+
+These are the input parameters of the simulation, they can be tuned in order to speed up or refine the results.
+For convenience reasons, the temperature will be given in units of \([k_B/J]\dot K\).
+
+#+begin_src jupyter-python :session ising
+  # Parameter initialization
+  NTEMP = 30
+  TEMP = np.linspace(1.5, 3.5, NTEMP)
+  LENGHT = 10
+  NSTEPS = 1e4
+
+  # Variables initialization
+  ENERG = np.zeros(NTEMP)
+#+end_src
+
+** Run the simulation and compute expectation value
+
+#+begin_src jupyter-python :session ising
+  for tdx, tval in enumerate(TEMP):
+      # Compute beta factor
+      BETA = 1 / tval
+
+      # Initial grid
+      GRID = init_state(LENGHT)
+
+      # Generate the Markov chain
+      ENT = 0
+      for step in np.arange(NSTEPS):
+          mc_update(GRID, BETA, LENGHT)
+          ENT += energ(GRID, LENGHT)
+
+      # Set energy value
+      ENERG[tdx] = ENT / (NSTEPS * LENGHT * LENGHT)
+#+end_src
+
+** Find critical temperature
+
+#+begin_src jupyter-python :session ising
+  plt.plot(TEMP, ENERG)
+  plt.ylabel(r'$E/J$')
+  plt.xlabel(r'k_B T/J')
+  plt.show()
+#+end_src
+
+** Questions:
+
+1. Complete all missing code sections
+2. Plot the energy temperature curve
+3. Which are the units of the energy and temperature on the plot?
+4. What is the value of the critical temperature? Compare with the [[https://en.wikipedia.org/wiki/Square_lattice_Ising_model#Critical_temperature][analytical]] value.
